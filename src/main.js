@@ -144,7 +144,7 @@ try {
     if (input.debugProbe) {
         const user = usernames[0] || 'instagram';
         const markers = ['shortcode', '"code":', 'edge_liked_by', 'like_count', 'video_view_count', 'play_count', 'edge_media_to_comment',
-            'comment_count', 'contextJSON', 'gql_data', 'shortcode_media', 'taken_at', 'EmbedSidecar', 'Embed', 'xdt_', 'LSD', 'profile_id', 'Likes', 'likes', 'views', 'Follow'];
+            'comment_count', 'contextJSON', 'gql_data', 'shortcode_media', 'taken_at', 'EmbedSidecar', 'Embed', 'xdt_', 'LSD', 'profile_id', 'Likes', 'likes', 'views', 'Follow', 'video_play_count', 'like_and_view_counts_disabled', 'product_type', 'clips'];
         const report = {};
         const probe = async (key, url) => {
             try {
@@ -162,12 +162,13 @@ try {
                 return [];
             }
         };
-        await probe('profile', `https://www.instagram.com/${user}/`);
-        const codes = await probe('profileEmbed', `https://www.instagram.com/${user}/embed/`);
-        const first = (codes[0] || '').split('/').pop() || shortcodes[0];
+        const codes = await probe('profile', `https://www.instagram.com/${user}/`);
+        await probe('profileEmbed', `https://www.instagram.com/${user}/embed/`);
+        const reel = codes.find((c) => c.includes('/reel/'));
+        const first = (reel || codes[0] || '').split('/').pop() || shortcodes[0];
         if (first) {
             await probe('postEmbedCaptioned', `https://www.instagram.com/p/${first}/embed/captioned/`);
-            await probe('postPage', `https://www.instagram.com/p/${first}/`);
+            await probe('reelEmbed', `https://www.instagram.com/reel/${first}/embed/`);
         }
         await Actor.setValue('PROBE', report);
         await Actor.exit('Probe saved to key-value store record PROBE.');
