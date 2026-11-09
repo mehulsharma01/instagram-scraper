@@ -28,6 +28,10 @@ Each post row has `engagementRate` ((likes + comments) / followers) and `viewsPe
 }
 ```
 
+## Saving images
+
+Set **Save post images** to store each post's cover image in the run's key-value store as `IMG_<shortcode>`. Each post row then has `imageKey`. This is used to design carousels from the posts.
+
 ## When requests get blocked
 
 A blocked page is retried with a new IP. A profile that still fails is saved as a row with `type: "error"` and the run continues. Like and view counts are missing on posts where the owner hid them (`countsHidden: true`).
