@@ -157,3 +157,11 @@ test('withheld counts are reported as unknown, not zero', async () => {
     assert.equal(row.views, null);
     assert.equal(row.comments, 3);
 });
+
+test('post date is decoded from the shortcode', async () => {
+    const { dateFromShortcode } = await import('../src/parse.js');
+    // Instagram reported taken_at_timestamp 1789743245 for this carousel.
+    assert.equal(dateFromShortcode('DdbsklMmUiu').slice(0, 19), new Date(1789743245 * 1000).toISOString().slice(0, 19));
+    assert.equal(dateFromShortcode('DOyG4W8kmaO').slice(0, 10), '2025-09-19');
+    assert.equal(dateFromShortcode('!!'), null);
+});

@@ -49,6 +49,25 @@ export function postType(node) {
 
 const round = (n, d = 4) => (n === null || !Number.isFinite(n) ? null : Math.round(n * 10 ** d) / 10 ** d);
 
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const IG_EPOCH_MS = 1314220021721;
+
+/**
+ * Instagram media ids carry their creation time: (id >> 23) is milliseconds since IG's epoch.
+ * The shortcode is the id in base64, so the post date can be read from the link alone.
+ */
+export function dateFromShortcode(shortcode) {
+    if (typeof shortcode !== 'string' || shortcode.length < 6) return null;
+    let n = 0n;
+    for (const c of shortcode.slice(0, 11)) {
+        const v = B64.indexOf(c);
+        if (v < 0) return null;
+        n = n * 64n + BigInt(v);
+    }
+    const ms = Number(n >> 23n) + IG_EPOCH_MS;
+    return ms > IG_EPOCH_MS && ms < Date.now() + 86400000 ? new Date(ms).toISOString() : null;
+}
+
 /** One Instagram post/reel node -> one dataset row. */
 export function normalizePost(node, owner = {}) {
     const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text
@@ -69,7 +88,7 @@ export function normalizePost(node, owner = {}) {
         followers,
         shortcode,
         url: shortcode ? `https://www.instagram.com/${type === 'reel' ? 'reel' : 'p'}/${shortcode}/` : null,
-        takenAt: ts ? new Date(ts * 1000).toISOString() : null,
+        takenAt: ts ? new Date(ts * 1000).toISOString() : dateFromShortcode(shortcode),
         caption,
         hashtags: hashtagsOf(caption),
         likes,
