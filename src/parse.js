@@ -173,8 +173,19 @@ export function parseEmbedPost(html, owner = {}) {
         username: owner.username ?? node.owner?.username?.toLowerCase() ?? null,
         followers: owner.followers ?? count(node.owner?.edge_followed_by),
     });
-    if (row.likes === null) row.likes = parseCount(html.match(/>([\d.,]+[KkMm]?) likes</)?.[1]);
-    row.countsHidden = Boolean(node.like_and_view_counts_disabled);
+    const shownLikes = parseCount(html.match(/>([\d.,]+[KkMm]?) likes?</)?.[1]);
+    if (!row.likes && shownLikes) row.likes = shownLikes;
+    // Instagram sends 0 likes and no views when it withholds counts (hidden by the owner,
+    // or not shown to logged-out visitors). Report that as unknown, not as zero.
+    const withheld = node.like_and_view_counts_disabled
+        || (row.likes === 0 && !shownLikes && (row.views === null || row.views === 0));
+    row.countsHidden = Boolean(withheld);
+    if (withheld) {
+        row.likes = null;
+        row.views = null;
+        row.engagementRate = null;
+        row.viewsPerFollower = null;
+    }
     const preview = node.edge_media_to_parent_comment?.edges || node.edge_media_preview_comment?.edges || [];
     if (preview.length) {
         row.topComments = preview.slice(0, 20).map((e) => ({

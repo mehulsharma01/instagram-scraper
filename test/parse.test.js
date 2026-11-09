@@ -145,3 +145,15 @@ test('embed pages: contextJSON, shortcodes, post and profile rows', async () => 
     const codes = extractShortcodes('href="/p/DdbsklMmUiu/" "url":"\\/reel\\/DOyG4W8kmaO\\/" /reel/DOyG4W8kmaO/ /p/DdbsklMmUiu', 12);
     assert.deepEqual(codes.map((c) => c.shortcode), ['DdbsklMmUiu', 'DOyG4W8kmaO']);
 });
+
+test('withheld counts are reported as unknown, not zero', async () => {
+    const { parseEmbedPost } = await import('../src/parse.js');
+    const media = { __typename: 'GraphVideo', shortcode: 'DXzNA1WB3JT', is_video: true, product_type: 'clips',
+        edge_liked_by: { count: 0 }, edge_media_to_comment: { count: 3 } };
+    const lit = JSON.stringify(JSON.stringify({ gql_data: { shortcode_media: media } })).slice(1, -1);
+    const row = parseEmbedPost(`{"contextJSON":"${lit}"}`, { username: 'glimsera', followers: 99995 });
+    assert.equal(row.countsHidden, true);
+    assert.equal(row.likes, null);
+    assert.equal(row.views, null);
+    assert.equal(row.comments, 3);
+});
