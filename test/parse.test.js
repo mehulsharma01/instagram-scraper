@@ -165,3 +165,14 @@ test('post date is decoded from the shortcode', async () => {
     assert.equal(dateFromShortcode('DOyG4W8kmaO').slice(0, 10), '2025-09-19');
     assert.equal(dateFromShortcode('!!'), null);
 });
+
+test('carousel children and video url are kept', async () => {
+    const { parseEmbedPost } = await import('../src/parse.js');
+    const media = { __typename: 'GraphSidecar', shortcode: 'C4r0usel', edge_liked_by: { count: 50 }, edge_media_to_comment: { count: 2 },
+        edge_sidecar_to_children: { edges: [{ node: { display_url: 'https://x/1.jpg', is_video: false } }, { node: { display_url: 'https://x/2.jpg', is_video: true, video_url: 'https://x/2.mp4' } }] } };
+    const lit = JSON.stringify(JSON.stringify({ gql_data: { shortcode_media: media } })).slice(1, -1);
+    const row = parseEmbedPost(`{"contextJSON":"${lit}"}`, { username: 'a', followers: 100 });
+    assert.equal(row.type, 'carousel');
+    assert.equal(row.children.length, 2);
+    assert.equal(row.children[1].videoUrl, 'https://x/2.mp4');
+});

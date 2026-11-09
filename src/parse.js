@@ -205,6 +205,15 @@ export function parseEmbedPost(html, owner = {}) {
         row.engagementRate = null;
         row.viewsPerFollower = null;
     }
+    row.videoUrl = node.video_url || null;
+    const kids = node.edge_sidecar_to_children?.edges || [];
+    if (kids.length) {
+        row.children = kids.map((e) => ({
+            imageUrl: e.node?.display_url || null,
+            isVideo: Boolean(e.node?.is_video),
+            videoUrl: e.node?.video_url || null,
+        }));
+    }
     const preview = node.edge_media_to_parent_comment?.edges || node.edge_media_preview_comment?.edges || [];
     if (preview.length) {
         row.topComments = preview.slice(0, 20).map((e) => ({

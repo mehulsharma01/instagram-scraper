@@ -53,7 +53,13 @@
         "saveImages": {
             "title": "Save post images",
             "type": "boolean",
-            "description": "Stores each post's cover image in the key-value store as IMG_<shortcode> (for carousel design).",
+            "description": "Stores every image (all carousel slides) in the key-value store as IMG_<shortcode>(_n), in 190 KB parts (<key>.p0, .p1...).",
+            "default": false
+        },
+        "saveVideos": {
+            "title": "Save post videos",
+            "type": "boolean",
+            "description": "Stores each Reel or carousel video in the key-value store as VID_<shortcode>(_n), in 190 KB parts.",
             "default": false
         },
         "debugProbe": {

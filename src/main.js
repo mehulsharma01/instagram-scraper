@@ -99,21 +99,35 @@ try {
 
     const stats = { profilesOk: 0, postsSaved: 0, failed: [] };
 
-    /** Optional: store each post's cover image in the key-value store (IMG_<shortcode>). */
+    /** Binary files are stored in 190 KB parts (<KEY>.p0, .p1, ...) so readers with a small inline limit can fetch them. */
+    const PART = 190000;
+    async function saveBinary(key, url) {
+        const proxyUrl = proxy ? await proxy.newUrl(`bin_${Date.now()}_${Math.floor(Math.random() * 1e6)}`) : undefined;
+        const res = await gotScraping({ url, proxyUrl, responseType: 'buffer', timeout: { request: 60000 }, throwHttpErrors: false });
+        if (res.statusCode !== 200 || !res.body?.length) throw new Error(`HTTP ${res.statusCode}`);
+        const buf = res.body; const parts = Math.ceil(buf.length / PART);
+        for (let i = 0; i < parts; i++) {
+            await Actor.setValue(`${key}.p${i}`, buf.subarray(i * PART, (i + 1) * PART), { contentType: 'application/octet-stream' });
+        }
+        return { key, parts, bytes: buf.length, contentType: res.headers['content-type'] || null };
+    }
+
+    /** Optional: save the post's images (every carousel slide) and videos to the key-value store. */
     async function saveImage(row) {
-        if (!input.saveImages || !row?.thumbnail || !row.shortcode) return row;
-        try {
-            const proxyUrl = proxy ? await proxy.newUrl(`img_${Date.now()}`) : undefined;
-            const res = await gotScraping({ url: row.thumbnail, proxyUrl, responseType: 'buffer', timeout: { request: 30000 }, throwHttpErrors: false });
-            if (res.statusCode === 200 && res.body?.length > 1000) {
-                const key = `IMG_${row.shortcode.replace(/[^A-Za-z0-9_-]/g, '_')}`;
-                await Actor.setValue(key, res.body, { contentType: res.headers['content-type'] || 'image/jpeg' });
-                row.imageKey = key;
-            } else {
-                log.warning(`Image for ${row.shortcode}: HTTP ${res.statusCode}`);
-            }
-        } catch (err) {
-            log.warning(`Image for ${row.shortcode} failed: ${err.message}`);
+        if (!row?.shortcode || (!input.saveImages && !input.saveVideos)) return row;
+        const base = row.shortcode.replace(/[^A-Za-z0-9_-]/g, '_');
+        const jobs = [];
+        if (input.saveImages) {
+            if (row.children?.length) row.children.forEach((c, i) => c.imageUrl && jobs.push([`IMG_${base}_${i + 1}`, c.imageUrl]));
+            else if (row.thumbnail) jobs.push([`IMG_${base}`, row.thumbnail]);
+        }
+        if (input.saveVideos) {
+            if (row.videoUrl) jobs.push([`VID_${base}`, row.videoUrl]);
+            row.children?.forEach((c, i) => c.videoUrl && jobs.push([`VID_${base}_${i + 1}`, c.videoUrl]));
+        }
+        row.files = [];
+        for (const [key, url] of jobs) {
+            try { row.files.push(await saveBinary(key, url)); } catch (err) { log.warning(`${key} failed: ${err.message}`); }
         }
         return row;
     }
