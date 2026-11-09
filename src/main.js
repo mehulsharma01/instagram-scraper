@@ -28,7 +28,7 @@ try {
     const maxRetries = Number.isInteger(input.maxRetries) ? input.maxRetries : 3;
     const includeProfileRow = input.includeProfileRow !== false;
 
-    if (!usernames.length && !shortcodes.length) {
+    if (!usernames.length && !shortcodes.length && !(input.fileUrls || []).length) {
         const msg = 'Nothing to scrape. Add at least one username in "Profiles" or a link in "Post or Reel URLs".';
         log.error(msg, { receivedInput: input });
         await Actor.fail(msg);
@@ -130,6 +130,19 @@ try {
             try { row.files.push(await saveBinary(key, url)); } catch (err) { log.warning(`${key} failed: ${err.message}`); }
         }
         return row;
+    }
+
+    // Optional: download any public files (logos, reference images) into the key-value store as FILE_<n>.
+    if (Array.isArray(input.fileUrls) && input.fileUrls.length) {
+        for (const [i, url] of input.fileUrls.entries()) {
+            try {
+                const f = await saveBinary(`FILE_${i + 1}`, url);
+                await Actor.pushData({ type: 'file', url, ...f });
+            } catch (err) {
+                await Actor.pushData({ type: 'error', target: url, error: err.message });
+            }
+        }
+        if (!usernames.length && !shortcodes.length) await Actor.exit(`Saved ${input.fileUrls.length} file(s).`);
     }
 
     // Debug probe: save a compact report of what each logged-out page contains.

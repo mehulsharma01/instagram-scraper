@@ -18,6 +18,12 @@
             "description": "Optional. Direct links like https://www.instagram.com/reel/ABC123/ to get one post's numbers.",
             "editor": "stringList"
         },
+        "fileUrls": {
+            "title": "Extra file URLs",
+            "type": "array",
+            "description": "Optional public file links (logos, reference images) to save in the key-value store as FILE_1, FILE_2... in 190 KB parts.",
+            "editor": "stringList"
+        },
         "maxPostsPerProfile": {
             "title": "Max posts per profile",
             "type": "integer",
