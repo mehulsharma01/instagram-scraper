@@ -133,6 +133,25 @@ try {
     }
 
     // Optional: download any public files (logos, reference images) into the key-value store as FILE_<n>.
+    if (Array.isArray(input.fileUrls) && input.fileUrls.length && input.bundle) {
+        // Bundle mode: download all files into one blob (BUNDLE.p0, .p1...) plus an index (BUNDLE_INDEX).
+        const index = []; const bufs = []; let offset = 0;
+        for (const [i, url] of input.fileUrls.entries()) {
+            try {
+                const proxyUrl = proxy ? await proxy.newUrl(`b_${i}_${Date.now()}`) : undefined;
+                const res = await gotScraping({ url, proxyUrl, responseType: 'buffer', timeout: { request: 30000 }, throwHttpErrors: false });
+                if (res.statusCode !== 200 || !res.body?.length) throw new Error(`HTTP ${res.statusCode}`);
+                index.push({ i: i + 1, url, offset, length: res.body.length, contentType: res.headers['content-type'] || null });
+                bufs.push(res.body); offset += res.body.length;
+            } catch (err) {
+                index.push({ i: i + 1, url, error: err.message });
+            }
+        }
+        const all = Buffer.concat(bufs); const parts = Math.ceil(all.length / PART);
+        for (let k = 0; k < parts; k++) await Actor.setValue(`BUNDLE.p${k}`, all.subarray(k * PART, (k + 1) * PART), { contentType: 'application/octet-stream' });
+        await Actor.setValue('BUNDLE_INDEX', { parts, bytes: all.length, files: index });
+        await Actor.exit(`Bundled ${index.filter((x) => !x.error).length}/${index.length} files into ${parts} part(s).`);
+    }
     if (Array.isArray(input.fileUrls) && input.fileUrls.length) {
         for (const [i, url] of input.fileUrls.entries()) {
             try {

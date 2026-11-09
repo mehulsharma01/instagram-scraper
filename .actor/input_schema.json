@@ -24,6 +24,12 @@
             "description": "Optional public file links (logos, reference images) to save in the key-value store as FILE_1, FILE_2... in 190 KB parts.",
             "editor": "stringList"
         },
+        "bundle": {
+            "title": "Bundle files",
+            "type": "boolean",
+            "description": "Save all Extra file URLs into one blob (BUNDLE.p0, .p1...) with an index record BUNDLE_INDEX, so many small files download in few parts.",
+            "default": false
+        },
         "maxPostsPerProfile": {
             "title": "Max posts per profile",
             "type": "integer",
