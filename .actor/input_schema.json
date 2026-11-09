@@ -50,6 +50,12 @@
                 ]
             }
         },
+        "saveImages": {
+            "title": "Save post images",
+            "type": "boolean",
+            "description": "Stores each post's cover image in the key-value store as IMG_<shortcode> (for carousel design).",
+            "default": false
+        },
         "debugProbe": {
             "title": "Probe page formats (debug)",
             "type": "boolean",

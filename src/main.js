@@ -99,6 +99,25 @@ try {
 
     const stats = { profilesOk: 0, postsSaved: 0, failed: [] };
 
+    /** Optional: store each post's cover image in the key-value store (IMG_<shortcode>). */
+    async function saveImage(row) {
+        if (!input.saveImages || !row?.thumbnail || !row.shortcode) return row;
+        try {
+            const proxyUrl = proxy ? await proxy.newUrl(`img_${Date.now()}`) : undefined;
+            const res = await gotScraping({ url: row.thumbnail, proxyUrl, responseType: 'buffer', timeout: { request: 30000 }, throwHttpErrors: false });
+            if (res.statusCode === 200 && res.body?.length > 1000) {
+                const key = `IMG_${row.shortcode.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+                await Actor.setValue(key, res.body, { contentType: res.headers['content-type'] || 'image/jpeg' });
+                row.imageKey = key;
+            } else {
+                log.warning(`Image for ${row.shortcode}: HTTP ${res.statusCode}`);
+            }
+        } catch (err) {
+            log.warning(`Image for ${row.shortcode} failed: ${err.message}`);
+        }
+        return row;
+    }
+
     // Debug probe: save a compact report of what each logged-out page contains.
     if (input.debugProbe) {
         const user = usernames[0] || 'instagram';
@@ -158,7 +177,7 @@ try {
             let saved = 0;
             for (const { shortcode } of codes) {
                 try {
-                    const row = await fetchPost(shortcode, { username, followers: profile.followers });
+                    const row = await saveImage(await fetchPost(shortcode, { username, followers: profile.followers }));
                     await Actor.pushData(row);
                     saved += 1;
                 } catch (err) {
@@ -180,7 +199,7 @@ try {
     for (const [i, shortcode] of shortcodes.entries()) {
         await Actor.setStatusMessage(`Post ${i + 1}/${shortcodes.length}: ${shortcode}`);
         try {
-            await Actor.pushData(await fetchPost(shortcode));
+            await Actor.pushData(await saveImage(await fetchPost(shortcode)));
             stats.postsSaved += 1;
         } catch (err) {
             log.error(`Post ${shortcode} failed: ${err.message}`);
