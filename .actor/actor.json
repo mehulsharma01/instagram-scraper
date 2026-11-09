@@ -1,0 +1,30 @@
+{
+    "actorSpecification": 1,
+    "name": "instagram-scraper",
+    "title": "Instagram Scraper (Glimsera)",
+    "description": "Public Instagram profiles and their latest posts and reels: likes, comments, views, caption, hashtags and engagement rate. No login.",
+    "version": "1.0",
+    "buildTag": "latest",
+    "input": "./input_schema.json",
+    "dockerfile": "../Dockerfile",
+    "storages": {
+        "dataset": {
+            "actorSpecification": 1,
+            "views": {
+                "overview": {
+                    "title": "Posts",
+                    "transformation": {
+                        "fields": ["username", "type", "url", "takenAt", "views", "likes", "comments", "engagementRate", "viewsPerFollower", "caption"]
+                    },
+                    "display": {
+                        "component": "table",
+                        "properties": {
+                            "url": { "format": "link" },
+                            "takenAt": { "format": "date" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

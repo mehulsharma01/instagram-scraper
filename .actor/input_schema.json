@@ -1,0 +1,50 @@
+{
+    "title": "Instagram Scraper input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "usernames": {
+            "title": "Profiles",
+            "type": "array",
+            "description": "Instagram usernames or profile URLs. Each returns the profile plus its latest posts (Instagram shows up to 12 without login).",
+            "editor": "stringList",
+            "prefill": ["glimsera"]
+        },
+        "postUrls": {
+            "title": "Post or Reel URLs",
+            "type": "array",
+            "description": "Optional. Direct links like https://www.instagram.com/reel/ABC123/ to get one post's numbers.",
+            "editor": "stringList"
+        },
+        "maxPostsPerProfile": {
+            "title": "Max posts per profile",
+            "type": "integer",
+            "description": "Instagram's public profile data holds up to 12 recent posts.",
+            "default": 12,
+            "minimum": 1,
+            "maximum": 12
+        },
+        "includeProfileRow": {
+            "title": "Add one profile summary row per account",
+            "type": "boolean",
+            "description": "Adds a row with type 'profile' (followers, post count, bio) next to the post rows.",
+            "default": true
+        },
+        "proxyConfiguration": {
+            "title": "Proxy",
+            "type": "object",
+            "description": "Instagram often blocks datacenter IPs. Residential proxy works best; try the default first.",
+            "editor": "proxy",
+            "default": { "useApifyProxy": true },
+            "prefill": { "useApifyProxy": true }
+        },
+        "maxRetries": {
+            "title": "Retries per request",
+            "type": "integer",
+            "description": "How many times to retry a blocked request with a new IP.",
+            "default": 4,
+            "minimum": 0,
+            "maximum": 10
+        }
+    }
+}
