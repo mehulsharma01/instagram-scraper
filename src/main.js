@@ -128,6 +128,7 @@ try {
         // Last resort: the public profile page. Gives counts only, no posts.
         try {
             const html = await request(`https://www.instagram.com/${enc}/`, { style: 'html', expect: 'html' });
+            if (input.debugSaveHtml) await Actor.setValue(`HTML_${username.replace(/[^a-z0-9]/gi, '_')}`, html, { contentType: 'text/html' });
             const profile = parseProfileHtml(html, username);
             if (profile) return { profile, posts: [], method: 'html' };
             errors.push('html: page had no profile counts');

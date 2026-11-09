@@ -38,6 +38,12 @@
             "default": { "useApifyProxy": true },
             "prefill": { "useApifyProxy": true }
         },
+        "debugSaveHtml": {
+            "title": "Save raw profile pages (debug)",
+            "type": "boolean",
+            "description": "Stores each fetched profile page in the key-value store, to diagnose parsing.",
+            "default": false
+        },
         "maxRetries": {
             "title": "Retries per request",
             "type": "integer",
