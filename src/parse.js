@@ -112,6 +112,41 @@ export function parseProfile(json, maxPosts = 12) {
     return { profile, posts };
 }
 
+/** "12.3K" / "1,234" / "1.2M" -> number */
+export function parseCount(s) {
+    if (!s) return null;
+    const m = String(s).trim().replace(/,/g, '').match(/^([\d.]+)\s*([KkMmBb])?$/);
+    if (!m) return null;
+    const mult = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+    return Math.round(parseFloat(m[1]) * mult);
+}
+
+/** Public profile page HTML -> profile row from its meta description, or null. */
+export function parseProfileHtml(html, username) {
+    if (typeof html !== 'string') return null;
+    const desc = html.match(/<meta[^>]+(?:name|property)="(?:og:)?description"[^>]+content="([^"]+)"/i)?.[1]
+        || html.match(/<meta[^>]+content="([^"]+)"[^>]+(?:name|property)="(?:og:)?description"/i)?.[1];
+    if (!desc) return null;
+    const text = desc.replace(/&#x2c;|&#44;/gi, ',').replace(/&amp;/g, '&');
+    const m = text.match(/([\d.,]+[KkMmBb]?)\s+Followers?,\s*([\d.,]+[KkMmBb]?)\s+Following,\s*([\d.,]+[KkMmBb]?)\s+Posts?/i);
+    if (!m) return null;
+    return {
+        type: 'profile',
+        username: username.toLowerCase(),
+        fullName: null,
+        followers: parseCount(m[1]),
+        following: parseCount(m[2]),
+        postsCount: parseCount(m[3]),
+        biography: null,
+        isVerified: null,
+        isPrivate: null,
+        category: null,
+        externalUrl: null,
+        url: `https://www.instagram.com/${username}/`,
+        scrapedAt: new Date().toISOString(),
+    };
+}
+
 /** Single post GraphQL response (old or new shape) -> row, or null. */
 export function parsePost(json) {
     const node = json?.data?.xdt_shortcode_media || json?.data?.shortcode_media || json?.graphql?.shortcode_media;

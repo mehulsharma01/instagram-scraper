@@ -95,3 +95,16 @@ test('parsePost reads the new xdt shape with comments', () => {
     assert.equal(row.topComments[0].text, 'what shade is this?');
     assert.equal(parsePost({ data: {} }), null);
 });
+
+test('parseProfileHtml reads counts from the meta description', async () => {
+    const { parseProfileHtml, parseCount } = await import('../src/parse.js');
+    assert.equal(parseCount('12.3K'), 12300);
+    assert.equal(parseCount('1,234'), 1234);
+    assert.equal(parseCount('2M'), 2000000);
+    const html = '<meta property="og:description" content="101K Followers, 52 Following, 566 Posts - See Instagram photos and videos from Glimsera (@glimsera)" />';
+    const p = parseProfileHtml(html, 'Glimsera');
+    assert.equal(p.followers, 101000);
+    assert.equal(p.following, 52);
+    assert.equal(p.postsCount, 566);
+    assert.equal(parseProfileHtml('<html></html>', 'x'), null);
+});
