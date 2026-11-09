@@ -108,3 +108,40 @@ test('parseProfileHtml reads counts from the meta description', async () => {
     assert.equal(p.postsCount, 566);
     assert.equal(parseProfileHtml('<html></html>', 'x'), null);
 });
+
+test('embed pages: contextJSON, shortcodes, post and profile rows', async () => {
+    const { extractContextJSON, extractShortcodes, parseEmbedPost, parseEmbedProfile } = await import('../src/parse.js');
+    const media = {
+        __typename: 'GraphVideo', shortcode: 'DOyG4W8kmaO', is_video: true, product_type: 'clips',
+        video_view_count: 4966450, video_duration: 15.534,
+        edge_media_to_caption: { edges: [{ node: { text: 'You want to try? 😍\n\nBlush hack #blush' } }] },
+        edge_media_to_comment: { count: 215 }, edge_liked_by: { count: 91124 },
+        clips_music_attribution_info: { artist_name: 'sma$her, MXZI', song_name: 'ACELERADA' },
+        taken_at_timestamp: 1789743245, owner: { id: '1', username: 'glimsera' },
+    };
+    const ctx = { context: { type: 'GraphVideo', shortcode: 'DOyG4W8kmaO' }, gql_data: { shortcode_media: media } };
+    // As it appears in the page: a JSON string inside a JSON blob, slashes escaped.
+    const literal = JSON.stringify(JSON.stringify(ctx)).slice(1, -1).replace(/\//g, '\\/');
+    const html = `<script>s.handle({"isRichEmbed":true,"contextJSON":"${literal}","x":1})</script>`
+        + '<a class="Likes" href="#">91,124 likes</a>' + 'x'.repeat(10);
+    assert.equal(extractContextJSON(html).gql_data.shortcode_media.video_view_count, 4966450);
+
+    const row = parseEmbedPost(html, { username: 'glimsera', followers: 99995 });
+    assert.equal(row.type, 'reel');
+    assert.equal(row.views, 4966450);
+    assert.equal(row.likes, 91124);
+    assert.equal(row.comments, 215);
+    assert.equal(row.viewsPerFollower, 49.67);
+    assert.equal(row.audio, 'sma$her, MXZI - ACELERADA');
+    assert.deepEqual(row.hashtags, ['#blush']);
+    assert.equal(parseEmbedPost('<html>nothing</html>'), null);
+
+    const pctx = { context: { username: 'Glimsera', full_name: 'Glimsera', followers_count: 99995, posts_count: 566 } };
+    const phtml = `{"contextJSON":"${JSON.stringify(JSON.stringify(pctx)).slice(1, -1)}"}`;
+    const p = parseEmbedProfile(phtml);
+    assert.equal(p.followers, 99995);
+    assert.equal(p.postsCount, 566);
+
+    const codes = extractShortcodes('href="/p/DdbsklMmUiu/" "url":"\\/reel\\/DOyG4W8kmaO\\/" /reel/DOyG4W8kmaO/ /p/DdbsklMmUiu', 12);
+    assert.deepEqual(codes.map((c) => c.shortcode), ['DdbsklMmUiu', 'DOyG4W8kmaO']);
+});

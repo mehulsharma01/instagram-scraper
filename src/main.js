@@ -1,21 +1,22 @@
 // Glimsera Instagram Scraper (Apify actor).
-// Public profiles -> latest posts with likes, comments, views and engagement.
-// Optional single post/reel URLs -> numbers plus a preview of top comments.
-// No login. Every request is wrapped so one blocked profile never crashes the run.
+//
+// Instagram's JSON APIs now answer logged-out visitors with 404, so this actor reads
+// the public pages Instagram serves to everyone:
+//   - profile page            -> follower/post counts + the 12 latest post links
+//   - profile embed page      -> exact follower count
+//   - post embed page (each)  -> views, likes, comments, caption, audio, date
+// No login. Every request is wrapped so one blocked page never crashes the run.
 
 import { Actor, log } from 'apify';
 import { gotScraping } from 'got-scraping';
-import { toUsername, toShortcode, parseProfile, parsePost, parseProfileHtml } from './parse.js';
-
-const IG_APP_ID = '936619743392459'; // Instagram web app id, sent by instagram.com itself
-const POST_DOC_ID = '8845758582119845'; // public GraphQL query for one post (xdt_shortcode_media)
+import {
+    toUsername, toShortcode, extractShortcodes, parseEmbedPost, parseEmbedProfile, parseProfileHtml,
+} from './parse.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const jitter = (base) => base + Math.floor(Math.random() * base);
 
 class BlockedError extends Error {}
-class NotFoundError extends Error {}
-
-if (process.env.DEBUG_IG === '1') log.setLevel(log.LEVELS.DEBUG);
 
 await Actor.init();
 
@@ -23,8 +24,8 @@ try {
     const input = (await Actor.getInput()) || {};
     const usernames = [...new Set((input.usernames || []).map(toUsername).filter(Boolean))];
     const shortcodes = [...new Set((input.postUrls || []).map(toShortcode).filter(Boolean))];
-    const maxPosts = Math.min(Math.max(Number(input.maxPostsPerProfile) || 12, 1), 12);
-    const maxRetries = Number.isInteger(input.maxRetries) ? input.maxRetries : 4;
+    const maxPosts = Math.min(Math.max(Number(input.maxPostsPerProfile) || 12, 0), 12);
+    const maxRetries = Number.isInteger(input.maxRetries) ? input.maxRetries : 3;
     const includeProfileRow = input.includeProfileRow !== false;
 
     if (!usernames.length && !shortcodes.length) {
@@ -35,140 +36,91 @@ try {
 
     let proxy = null;
     try {
-        proxy = await Actor.createProxyConfiguration(input.proxyConfiguration ?? { useApifyProxy: true });
+        proxy = await Actor.createProxyConfiguration(
+            input.proxyConfiguration ?? { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
+        );
     } catch (err) {
         log.warning(`Proxy not available (${err.message}). Continuing without a proxy; Instagram may block some requests.`);
     }
 
-    const MOBILE_UA = 'Instagram 309.1.0.41.113 Android (33/13; 420dpi; 1080x2400; samsung; SM-G991B; o1s; exynos2100; en_US; 541635890)';
-
-    // style: 'web' (browser-like XHR), 'mobile' (Android app UA), 'html' (plain page load)
-    async function request(url, { method = 'GET', form, referer, style = 'web', expect = 'json' } = {}) {
+    /** GET a public Instagram page as HTML, retrying blocked responses with a new IP. */
+    async function getPage(url) {
         let lastErr;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            const session = `ig_${Date.now()}_${Math.floor(Math.random() * 1e6)}`;
-            const proxyUrl = proxy ? await proxy.newUrl(session) : undefined;
+            const proxyUrl = proxy ? await proxy.newUrl(`ig_${Date.now()}_${Math.floor(Math.random() * 1e6)}`) : undefined;
             try {
-                const headers = style === 'mobile'
-                    ? { 'user-agent': MOBILE_UA, 'x-ig-app-id': '567067343352427', accept: '*/*', 'accept-language': 'en-US' }
-                    : style === 'html'
-                        ? { accept: 'text/html,application/xhtml+xml', 'accept-language': 'en-US,en;q=0.9' }
-                        : {
-                            'x-ig-app-id': IG_APP_ID,
-                            'x-requested-with': 'XMLHttpRequest',
-                            'x-asbd-id': '129477',
-                            accept: '*/*',
-                            referer: referer || 'https://www.instagram.com/',
-                            ...(method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-                        };
                 const res = await gotScraping({
                     url,
-                    method,
-                    form,
                     proxyUrl,
                     timeout: { request: 30000 },
                     followRedirect: false,
                     throwHttpErrors: false,
-                    useHeaderGenerator: style !== 'mobile',
                     headerGeneratorOptions: { browsers: ['chrome'], devices: ['desktop'], locales: ['en-US'] },
-                    headers,
+                    headers: { accept: 'text/html,application/xhtml+xml', 'accept-language': 'en-US,en;q=0.9' },
                 });
-                const { statusCode } = res;
                 const body = String(res.body || '');
-                const snippet = body.slice(0, 200).replace(/\s+/g, ' ');
-                if (statusCode !== 200) {
-                    log.debug(`HTTP ${statusCode} from ${url} (${style}): ${snippet}`);
+                if (res.statusCode >= 300 && res.statusCode < 400) {
+                    throw new BlockedError(`Redirected to ${res.headers.location || 'login'} (${res.statusCode})`);
                 }
-                // Instagram answers blocked IPs with 404, 401, 429 or a redirect to the login page.
-                if (statusCode >= 300 && statusCode < 400) {
-                    throw new BlockedError(`Redirected to ${res.headers.location || 'login'} (${statusCode})`);
+                if (res.statusCode !== 200) {
+                    throw new BlockedError(`HTTP ${res.statusCode}: ${body.slice(0, 120).replace(/\s+/g, ' ')}`);
                 }
-                if (statusCode !== 200) throw new BlockedError(`HTTP ${statusCode}: ${snippet || 'empty body'}`);
-                if (expect === 'html') return body;
-                let json;
-                try {
-                    json = JSON.parse(body);
-                } catch {
-                    throw new BlockedError(`Got HTML instead of JSON; likely a login wall: ${snippet}`);
-                }
-                if (json?.require_login || json?.status === 'fail') {
-                    throw new BlockedError(json.message || 'Instagram asked for login');
-                }
-                return json;
+                if (body.length < 2000) throw new BlockedError(`Page too short (${body.length} bytes)`);
+                return body;
             } catch (err) {
                 lastErr = err;
                 if (attempt === maxRetries) break;
                 const wait = Math.min(2000 * 2 ** attempt, 20000) + Math.floor(Math.random() * 1000);
-                log.warning(`Attempt ${attempt + 1}/${maxRetries + 1} (${style}) failed: ${err.message}. Retrying in ${Math.round(wait / 1000)}s with a new IP.`);
+                log.warning(`Attempt ${attempt + 1}/${maxRetries + 1} failed for ${url}: ${err.message}. Retrying in ${Math.round(wait / 1000)}s with a new IP.`);
                 await sleep(wait);
             }
         }
         throw lastErr || new BlockedError('Unknown error');
     }
 
-    // Try each way of reading a profile until one works.
-    async function fetchProfile(username) {
-        const errors = [];
-        const enc = encodeURIComponent(username);
-        const attempts = [
-            ['web', () => request(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${enc}`,
-                { referer: `https://www.instagram.com/${username}/` })],
-            ['mobile', () => request(`https://i.instagram.com/api/v1/users/web_profile_info/?username=${enc}`, { style: 'mobile' })],
+    /** One post: embed page first, the captioned variant as a fallback. */
+    async function fetchPost(shortcode, owner = {}) {
+        const urls = [
+            `https://www.instagram.com/p/${shortcode}/embed/captioned/`,
+            `https://www.instagram.com/reel/${shortcode}/embed/`,
         ];
-        for (const [name, run] of attempts) {
+        let lastErr;
+        for (const url of urls) {
             try {
-                const parsed = parseProfile(await run(), maxPosts);
-                if (parsed) return { ...parsed, method: name };
-                errors.push(`${name}: no profile data in response`);
+                const row = parseEmbedPost(await getPage(url), owner);
+                if (row) return row;
+                lastErr = new Error('Embed page had no post data (post may be deleted, private, or embedding is off)');
             } catch (err) {
-                errors.push(`${name}: ${err.message}`);
-                log.warning(`@${username}: ${name} method failed (${err.message}). Trying the next method.`);
+                lastErr = err;
             }
         }
-        // Last resort: the public profile page. Gives counts only, no posts.
-        try {
-            const html = await request(`https://www.instagram.com/${enc}/`, { style: 'html', expect: 'html' });
-            if (input.debugSaveHtml) await Actor.setValue(`HTML_${username.replace(/[^a-z0-9]/gi, '_')}`, html, { contentType: 'text/html' });
-            const profile = parseProfileHtml(html, username);
-            if (profile) return { profile, posts: [], method: 'html' };
-            errors.push('html: page had no profile counts');
-        } catch (err) {
-            errors.push(`html: ${err.message}`);
-        }
-        throw new BlockedError(errors.join(' | '));
+        throw lastErr;
     }
 
     const stats = { profilesOk: 0, postsSaved: 0, failed: [] };
 
-    // Debug probe: fetch candidate logged-out pages and save a compact report of what each contains.
+    // Debug probe: save a compact report of what each logged-out page contains.
     if (input.debugProbe) {
         const user = usernames[0] || 'instagram';
-        const markers = ['shortcode', '"code":', 'edge_liked_by', 'like_count', 'video_view_count', 'play_count', 'edge_media_to_comment',
-            'comment_count', 'contextJSON', 'gql_data', 'shortcode_media', 'taken_at', 'EmbedSidecar', 'Embed', 'xdt_', 'LSD', 'profile_id', 'Likes', 'likes', 'views', 'Follow', 'video_play_count', 'like_and_view_counts_disabled', 'product_type', 'clips'];
+        const markers = ['contextJSON', 'gql_data', 'shortcode_media', 'video_view_count', 'edge_liked_by',
+            'edge_media_to_comment', 'like_and_view_counts_disabled', 'og:description', 'product_type'];
         const report = {};
-        const probe = async (key, url) => {
+        for (const [key, url] of [
+            ['profile', `https://www.instagram.com/${user}/`],
+            ['profileEmbed', `https://www.instagram.com/${user}/embed/`],
+            ...(shortcodes[0] ? [['postEmbed', `https://www.instagram.com/p/${shortcodes[0]}/embed/captioned/`]] : []),
+        ]) {
             try {
-                const html = await request(url, { style: 'html', expect: 'html' });
+                const html = await getPage(url);
                 const found = {};
                 for (const m of markers) {
                     const idx = html.indexOf(m);
-                    if (idx >= 0) found[m] = { count: html.split(m).length - 1, sample: html.slice(Math.max(0, idx - 120), idx + 220) };
+                    if (idx >= 0) found[m] = { count: html.split(m).length - 1, sample: html.slice(Math.max(0, idx - 100), idx + 200) };
                 }
-                const codes = [...new Set((html.match(/\/(?:p|reel)\/([A-Za-z0-9_-]{8,})/g) || []))].slice(0, 15);
-                report[key] = { url, length: html.length, codes, found };
-                return codes;
+                report[key] = { url, length: html.length, shortcodes: extractShortcodes(html), found };
             } catch (err) {
                 report[key] = { url, error: err.message };
-                return [];
             }
-        };
-        const codes = await probe('profile', `https://www.instagram.com/${user}/`);
-        await probe('profileEmbed', `https://www.instagram.com/${user}/embed/`);
-        const reel = codes.find((c) => c.includes('/reel/'));
-        const first = (reel || codes[0] || '').split('/').pop() || shortcodes[0];
-        if (first) {
-            await probe('postEmbedCaptioned', `https://www.instagram.com/p/${first}/embed/captioned/`);
-            await probe('reelEmbed', `https://www.instagram.com/reel/${first}/embed/`);
         }
         await Actor.setValue('PROBE', report);
         await Actor.exit('Probe saved to key-value store record PROBE.');
@@ -177,52 +129,73 @@ try {
     for (const [i, username] of usernames.entries()) {
         await Actor.setStatusMessage(`Profile ${i + 1}/${usernames.length}: @${username}`);
         try {
-            const parsed = await fetchProfile(username);
-            if (parsed.profile.isPrivate) log.info(`@${username} is private; only the profile row is available.`);
-            parsed.profile.method = parsed.method;
-            if (includeProfileRow || !parsed.posts.length) await Actor.pushData(parsed.profile);
-            if (parsed.posts.length) await Actor.pushData(parsed.posts);
+            const pageHtml = await getPage(`https://www.instagram.com/${encodeURIComponent(username)}/`);
+            let profile = parseProfileHtml(pageHtml, username);
+            if (input.debugSaveHtml) {
+                await Actor.setValue(`HTML_${username.replace(/[^a-z0-9]/gi, '_')}`, pageHtml, { contentType: 'text/html' });
+            }
+
+            // The embed page has the exact follower count (the profile page rounds it, e.g. "100K").
+            try {
+                const embedProfile = parseEmbedProfile(await getPage(`https://www.instagram.com/${encodeURIComponent(username)}/embed/`));
+                if (embedProfile) {
+                    profile = {
+                        ...(profile || {}),
+                        ...embedProfile,
+                        following: profile?.following ?? null,
+                    };
+                }
+            } catch (err) {
+                log.warning(`@${username}: embed profile unavailable (${err.message}); using rounded counts.`);
+            }
+            if (!profile) throw new BlockedError('Profile page had no counts (private, missing, or a login wall)');
+
+            if (includeProfileRow) await Actor.pushData(profile);
             stats.profilesOk += 1;
-            stats.postsSaved += parsed.posts.length;
-            log.info(`@${username}: ${parsed.profile.followers ?? '?'} followers, ${parsed.posts.length} posts saved (method: ${parsed.method}).`);
+
+            const codes = extractShortcodes(pageHtml, maxPosts);
+            if (!codes.length && maxPosts > 0) log.warning(`@${username}: no post links found on the profile page.`);
+            let saved = 0;
+            for (const { shortcode } of codes) {
+                try {
+                    const row = await fetchPost(shortcode, { username, followers: profile.followers });
+                    await Actor.pushData(row);
+                    saved += 1;
+                } catch (err) {
+                    log.warning(`@${username} post ${shortcode}: ${err.message}`);
+                    stats.failed.push({ target: shortcode, error: err.message });
+                }
+                await sleep(jitter(700));
+            }
+            stats.postsSaved += saved;
+            log.info(`@${username}: ${profile.followers ?? '?'} followers, ${saved}/${codes.length} posts saved.`);
         } catch (err) {
             log.error(`@${username} failed: ${err.message}`);
             stats.failed.push({ target: `@${username}`, error: err.message });
             await Actor.pushData({ type: 'error', target: username, error: err.message, scrapedAt: new Date().toISOString() });
         }
-        await sleep(1500 + Math.floor(Math.random() * 1500));
+        await sleep(jitter(1200));
     }
 
     for (const [i, shortcode] of shortcodes.entries()) {
         await Actor.setStatusMessage(`Post ${i + 1}/${shortcodes.length}: ${shortcode}`);
         try {
-            const json = await request('https://www.instagram.com/graphql/query', {
-                method: 'POST',
-                referer: `https://www.instagram.com/p/${shortcode}/`,
-                form: {
-                    doc_id: POST_DOC_ID,
-                    variables: JSON.stringify({ shortcode, fetch_tagged_user_count: null, hoisted_comment_id: null, hoisted_reply_id: null }),
-                },
-            });
-            const row = parsePost(json);
-            if (!row) throw new NotFoundError('Post data missing from response (deleted, private, or the query changed)');
-            await Actor.pushData(row);
+            await Actor.pushData(await fetchPost(shortcode));
             stats.postsSaved += 1;
         } catch (err) {
             log.error(`Post ${shortcode} failed: ${err.message}`);
             stats.failed.push({ target: shortcode, error: err.message });
             await Actor.pushData({ type: 'error', target: shortcode, error: err.message, scrapedAt: new Date().toISOString() });
         }
-        await sleep(1000 + Math.floor(Math.random() * 1000));
+        await sleep(jitter(700));
     }
 
     await Actor.setValue('SUMMARY', stats);
     const summary = `Done: ${stats.profilesOk}/${usernames.length} profiles, ${stats.postsSaved} posts saved, ${stats.failed.length} failed.`;
     log.info(summary);
 
-    const total = usernames.length + shortcodes.length;
-    if (stats.failed.length === total) {
-        await Actor.fail(`${summary} Every request was blocked. Try "Proxy" set to Residential, or fewer profiles per run.`);
+    if (stats.profilesOk === 0 && stats.postsSaved === 0) {
+        await Actor.fail(`${summary} Every request was blocked. Use the Residential proxy, or fewer profiles per run.`);
     } else {
         await Actor.exit(summary);
     }

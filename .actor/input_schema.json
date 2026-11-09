@@ -6,9 +6,11 @@
         "usernames": {
             "title": "Profiles",
             "type": "array",
-            "description": "Instagram usernames or profile URLs. Each returns the profile plus its latest posts (Instagram shows up to 12 without login).",
+            "description": "Instagram usernames or profile URLs. Each returns a profile row plus its latest posts with views, likes and comments.",
             "editor": "stringList",
-            "prefill": ["glimsera"]
+            "prefill": [
+                "glimsera"
+            ]
         },
         "postUrls": {
             "title": "Post or Reel URLs",
@@ -19,9 +21,9 @@
         "maxPostsPerProfile": {
             "title": "Max posts per profile",
             "type": "integer",
-            "description": "Instagram's public profile data holds up to 12 recent posts.",
+            "description": "Latest posts to read per profile (up to 12; 0 = profile counts only). Each post costs one extra page load.",
             "default": 12,
-            "minimum": 1,
+            "minimum": 0,
             "maximum": 12
         },
         "includeProfileRow": {
@@ -33,10 +35,20 @@
         "proxyConfiguration": {
             "title": "Proxy",
             "type": "object",
-            "description": "Instagram often blocks datacenter IPs. Residential proxy works best; try the default first.",
+            "description": "Instagram blocks shared datacenter IPs. Residential works (tested Nov 2026) and costs about $0.03 per profile.",
             "editor": "proxy",
-            "default": { "useApifyProxy": true },
-            "prefill": { "useApifyProxy": true }
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": [
+                    "RESIDENTIAL"
+                ]
+            },
+            "prefill": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": [
+                    "RESIDENTIAL"
+                ]
+            }
         },
         "debugProbe": {
             "title": "Probe page formats (debug)",
@@ -44,19 +56,19 @@
             "description": "Fetches profile, embed and post pages for the first profile and saves a short report (PROBE) instead of scraping.",
             "default": false
         },
-        "debugSaveHtml": {
-            "title": "Save raw profile pages (debug)",
-            "type": "boolean",
-            "description": "Stores each fetched profile page in the key-value store, to diagnose parsing.",
-            "default": false
-        },
         "maxRetries": {
             "title": "Retries per request",
             "type": "integer",
             "description": "How many times to retry a blocked request with a new IP.",
-            "default": 4,
+            "default": 3,
             "minimum": 0,
             "maximum": 10
+        },
+        "debugSaveHtml": {
+            "title": "Save raw profile pages (debug)",
+            "type": "boolean",
+            "description": "Stores each fetched profile page in the key-value store.",
+            "default": false
         }
     }
 }

@@ -112,6 +112,101 @@ export function parseProfile(json, maxPosts = 12) {
     return { profile, posts };
 }
 
+/**
+ * Embed pages carry their data as a JSON string in "contextJSON":"...".
+ * Returns the parsed object, or null.
+ */
+export function extractContextJSON(html) {
+    if (typeof html !== 'string') return null;
+    // The key can appear plain ("contextJSON":") or JSON-escaped once more (\"contextJSON\":\").
+    for (const key of ['"contextJSON":"', '\\"contextJSON\\":\\"']) {
+        const start = html.indexOf(key);
+        if (start < 0) continue;
+        const escaped = key.startsWith('\\');
+        let i = start + key.length;
+        let out = '';
+        // Read up to the closing quote of this string literal.
+        while (i < html.length) {
+            const ch = html[i];
+            if (!escaped) {
+                if (ch === '\\') { out += ch + html[i + 1]; i += 2; continue; }
+                if (ch === '"') break;
+            } else if (html.startsWith('\\"', i) && !html.startsWith('\\\\"', i - 1)) {
+                break;
+            }
+            out += ch;
+            i += 1;
+        }
+        try {
+            let s = JSON.parse(`"${out}"`);
+            if (escaped) s = JSON.parse(`"${s}"`);
+            return JSON.parse(s);
+        } catch {
+            // try the next key form
+        }
+    }
+    return null;
+}
+
+/** Profile page or any page: unique post/reel shortcodes in page order. */
+export function extractShortcodes(html, limit = 12) {
+    if (typeof html !== 'string') return [];
+    const seen = new Set();
+    const out = [];
+    const re = /(?:\\?\/)(p|reel)(?:\\?\/)([A-Za-z0-9_-]{8,})/g;
+    let m;
+    while ((m = re.exec(html)) && out.length < limit) {
+        if (!seen.has(m[2])) {
+            seen.add(m[2]);
+            out.push({ shortcode: m[2], kind: m[1] });
+        }
+    }
+    return out;
+}
+
+/** Post embed page -> row with views, likes, comments, caption. */
+export function parseEmbedPost(html, owner = {}) {
+    const ctx = extractContextJSON(html);
+    const node = ctx?.gql_data?.shortcode_media;
+    if (!node) return null;
+    const row = normalizePost(node, {
+        username: owner.username ?? node.owner?.username?.toLowerCase() ?? null,
+        followers: owner.followers ?? count(node.owner?.edge_followed_by),
+    });
+    if (row.likes === null) row.likes = parseCount(html.match(/>([\d.,]+[KkMm]?) likes</)?.[1]);
+    row.countsHidden = Boolean(node.like_and_view_counts_disabled);
+    const preview = node.edge_media_to_parent_comment?.edges || node.edge_media_preview_comment?.edges || [];
+    if (preview.length) {
+        row.topComments = preview.slice(0, 20).map((e) => ({
+            text: e.node?.text ?? null,
+            likes: count(e.node?.edge_liked_by),
+            owner: e.node?.owner?.username ?? null,
+        }));
+    }
+    return row;
+}
+
+/** Profile embed page -> profile row (exact follower count) or null. */
+export function parseEmbedProfile(html) {
+    const ctx = extractContextJSON(html)?.context;
+    if (!ctx?.username) return null;
+    return {
+        type: 'profile',
+        username: ctx.username.toLowerCase(),
+        fullName: ctx.full_name || null,
+        followers: ctx.followers_count ?? null,
+        following: null,
+        postsCount: ctx.posts_count ?? null,
+        biography: null,
+        isVerified: Boolean(ctx.is_verified || ctx.verified),
+        isPrivate: null,
+        category: null,
+        externalUrl: null,
+        url: `https://www.instagram.com/${ctx.username}/`,
+        scrapedAt: new Date().toISOString(),
+    };
+}
+
 /** "12.3K" / "1,234" / "1.2M" -> number */
 export function parseCount(s) {
     if (!s) return null;
