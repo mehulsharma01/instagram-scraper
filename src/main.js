@@ -140,6 +140,39 @@ try {
 
     const stats = { profilesOk: 0, postsSaved: 0, failed: [] };
 
+    // Debug probe: fetch candidate logged-out pages and save a compact report of what each contains.
+    if (input.debugProbe) {
+        const user = usernames[0] || 'instagram';
+        const markers = ['shortcode', '"code":', 'edge_liked_by', 'like_count', 'video_view_count', 'play_count', 'edge_media_to_comment',
+            'comment_count', 'contextJSON', 'gql_data', 'shortcode_media', 'taken_at', 'EmbedSidecar', 'Embed', 'xdt_', 'LSD', 'profile_id', 'Likes', 'likes', 'views', 'Follow'];
+        const report = {};
+        const probe = async (key, url) => {
+            try {
+                const html = await request(url, { style: 'html', expect: 'html' });
+                const found = {};
+                for (const m of markers) {
+                    const idx = html.indexOf(m);
+                    if (idx >= 0) found[m] = { count: html.split(m).length - 1, sample: html.slice(Math.max(0, idx - 120), idx + 220) };
+                }
+                const codes = [...new Set((html.match(/\/(?:p|reel)\/([A-Za-z0-9_-]{8,})/g) || []))].slice(0, 15);
+                report[key] = { url, length: html.length, codes, found };
+                return codes;
+            } catch (err) {
+                report[key] = { url, error: err.message };
+                return [];
+            }
+        };
+        await probe('profile', `https://www.instagram.com/${user}/`);
+        const codes = await probe('profileEmbed', `https://www.instagram.com/${user}/embed/`);
+        const first = (codes[0] || '').split('/').pop() || shortcodes[0];
+        if (first) {
+            await probe('postEmbedCaptioned', `https://www.instagram.com/p/${first}/embed/captioned/`);
+            await probe('postPage', `https://www.instagram.com/p/${first}/`);
+        }
+        await Actor.setValue('PROBE', report);
+        await Actor.exit('Probe saved to key-value store record PROBE.');
+    }
+
     for (const [i, username] of usernames.entries()) {
         await Actor.setStatusMessage(`Profile ${i + 1}/${usernames.length}: @${username}`);
         try {

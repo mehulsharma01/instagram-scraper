@@ -38,6 +38,12 @@
             "default": { "useApifyProxy": true },
             "prefill": { "useApifyProxy": true }
         },
+        "debugProbe": {
+            "title": "Probe page formats (debug)",
+            "type": "boolean",
+            "description": "Fetches profile, embed and post pages for the first profile and saves a short report (PROBE) instead of scraping.",
+            "default": false
+        },
         "debugSaveHtml": {
             "title": "Save raw profile pages (debug)",
             "type": "boolean",
